@@ -1,0 +1,14 @@
+{
+    "name": "file-server",
+    "version": "0.0.1",
+    "description": "File server HTTP API",
+    "main": "index.js",
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.17.1",
+        "multer": "^1.4.2"
+    },
+    "author": {
+        "name": "Benjámin Ferge <benjamin.ferge@protonmail.com>"
+    }
+}

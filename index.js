@@ -44,30 +44,75 @@ app.post("/upload/file", (req, res) => {
         return res.json(response);
     });
 });
-app.post("/upload/image", (req, res) => {
+
+
+function _uploadMemWrapper(req, res, onSuccess, onError) {
     uploadMem(req, res, (err) => {
-        if (err) {
-            console.error(err)
-            res.statusCode = 400;
-            return res.end(err.message);
-        }
+        if (err)
+            return onError(err);
         const { files, body } = req;
         const response = { files };
         const now = Date.now();
-        response.files.forEach((f) => {
-            if (body.withThumbnail)
-                f.thumbnailPath = makeThumbnail(f, now);
-            f.path = compressImage(f, 80, now, body.watermark);
+        let promises = [];
+        const thumbs = [];
+        response.files.forEach((f, i) => {
+            if (body.withThumbnail) {
+                promises.push(makeThumbnailPromise(f, now));
+                thumbs.push(i);
+            }
+            promises.push(compressImagePromise(f, 80, now, body.watermark));
         });
-        return res.json(response);
+        Promise.all(promises).then(all => {
+            let fileIdx = 0;
+            all.forEach((filename, i) => {
+                if (thumbs.includes(i)) {
+                    response.files[fileIdx].thumbnailPath = filename;
+                } else {
+                    response.files[fileIdx].path = filename;
+                    ++fileIdx;
+                }
+            });
+            onSuccess(response);
+        })
+            .catch(err => onError(err));
     });
+}
+
+function uploadMemPromise(req, res) {
+    return new Promise((resolve, reject) => {
+        _uploadMemWrapper(req, res, successRes => {
+            resolve(successRes);
+        }, errorRes => {
+            reject(errorRes);
+        })
+    })
+}
+
+app.post("/upload/image", async (req, res) => {
+    try {
+        const result = await uploadMemPromise(req, res);
+        return res.json(result);
+    } catch (error) {
+        res.statusCode = 400;
+        return res.end(result);
+    }
 });
 
 app.listen(5000, () => {
     console.log("File Server listening on port 5000");
 });
 
-function makeThumbnail(file, pathPrefix = Date.now()) {
+function makeThumbnailPromise(file, pathPrefix = Date.now()) {
+    return new Promise((resolve, reject) => {
+        makeThumbnail(file, (err, data) => {
+            if (err)
+                reject(err);
+            resolve(data);
+        }, pathPrefix);
+    });
+}
+
+function makeThumbnail(file, cb, pathPrefix = Date.now()) {
     const [width, height] = [200, 200];
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext);
@@ -81,14 +126,20 @@ function makeThumbnail(file, pathPrefix = Date.now()) {
         .strip()
         .autoOrient()
         .quality(80)
-        .write(dst, (err) => {
-            if (err)
-                return console.error(err);
-        });
-    return filename;
+        .write(dst, err => cb(err, filename));
 }
 
-function compressImage(file, quality = 80, pathPrefix = Date.now(), watermark = undefined) {
+function compressImagePromise(file, quality = 80, pathPrefix = Date.now(), watermark = undefined) {
+    return new Promise((resolve, reject) => {
+        compressImage(file, (err, data) => {
+            if (err)
+                reject(err);
+            resolve(data);
+        }, quality, pathPrefix, watermark)
+    })
+}
+
+function compressImage(file, cb, quality = 80, pathPrefix = Date.now(), watermark = undefined) {
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext);
     const filename = `${pathPrefix}-${basename}${ext}`;
@@ -98,7 +149,7 @@ function compressImage(file, quality = 80, pathPrefix = Date.now(), watermark = 
     gmObj
         .size(function (err, originalSize) {
             if (err)
-                return console.error(err);
+                return cb(err, null);
             let gmObj2 = gmObj;
 
             if (watermark) {
@@ -112,8 +163,6 @@ function compressImage(file, quality = 80, pathPrefix = Date.now(), watermark = 
                 gmObj2 = gmObj2
                     .fill("#FFFFFFAA")
                     .font(fontFamily, fontSize)
-                    // .gravity("SouthEast")
-                    // .draw([`rotate -25 text ${0},${paddingY} "${watermark}"`])
                     .drawText(fontSize, fontSize, watermark, "SouthEast");
             }
             gmObj2
@@ -121,11 +170,10 @@ function compressImage(file, quality = 80, pathPrefix = Date.now(), watermark = 
                 .quality(quality)
                 .strip()
                 .autoOrient()
-                .write(dst, (err) => {
+                .write(dst, err => {
                     if (err)
-                        return console.error(err);
+                        return cb(err, null);
+                    cb(null, filename);
                 });
         });
-
-    return filename;
 }

@@ -54,12 +54,11 @@ app.post("/upload/image", (req, res) => {
         const { files, body } = req;
         const response = { files };
         const now = Date.now();
-        if (body.withThumbnail) {
-            response.files.forEach((f) => {
+        response.files.forEach((f) => {
+            if (body.withThumbnail)
                 f.thumbnailPath = makeThumbnail(f, now);
-                f.path = compressImage(f, 80, now);
-            });
-        }
+            f.path = compressImage(f, 80, now, body.watermark);
+        });
         return res.json(response);
     });
 });
@@ -72,7 +71,8 @@ function makeThumbnail(file, pathPrefix = Date.now()) {
     const [width, height] = [200, 200];
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext);
-    const dst = `storage/${pathPrefix}-${basename}.thumb.${ext}`;
+    const filename = `${pathPrefix}-${basename}.thumb${ext}`;
+    const dst = `storage/${filename}`;
     const gmFile = gm(file.buffer);
     gmFile
         .resize(width, height, "^")
@@ -85,20 +85,47 @@ function makeThumbnail(file, pathPrefix = Date.now()) {
             if (err)
                 return console.error(err);
         });
-    return dst;
+    return filename;
 }
 
-function compressImage(file, quality = 80, pathPrefix = Date.now()) {
+function compressImage(file, quality = 80, pathPrefix = Date.now(), watermark = undefined) {
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext);
-    const dst = `storage/${pathPrefix}-${basename}.${ext}`;
-    gm(file.buffer)
-        .quality(quality)
-        .strip()
-        .autoOrient()
-        .write(dst, (err) => {
+    const filename = `${pathPrefix}-${basename}${ext}`;
+    const dst = `storage/${filename}`;
+    const gmObj = gm(file.buffer);
+    const maxWidth = 1920;
+    gmObj
+        .size(function (err, originalSize) {
             if (err)
                 return console.error(err);
+            let gmObj2 = gmObj;
+
+            if (watermark) {
+                const fontFamily = "Helvetica";
+                const deltaRatio = maxWidth / originalSize.width;
+                const height = deltaRatio * originalSize.height;
+                const ratio = maxWidth / height;
+                const fontSize = maxWidth * height / (10_000 * ratio);
+                const copyright = "\u00A9";
+                watermark = copyright + " " + watermark;
+                gmObj2 = gmObj2
+                    .fill("#FFFFFFAA")
+                    .font(fontFamily, fontSize)
+                    // .gravity("SouthEast")
+                    // .draw([`rotate -25 text ${0},${paddingY} "${watermark}"`])
+                    .drawText(fontSize, fontSize, watermark, "SouthEast");
+            }
+            gmObj2
+                .resize(maxWidth)
+                .quality(quality)
+                .strip()
+                .autoOrient()
+                .write(dst, (err) => {
+                    if (err)
+                        return console.error(err);
+                });
         });
-    return dst;
+
+    return filename;
 }

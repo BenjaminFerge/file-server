@@ -55,17 +55,18 @@ function _uploadMemWrapper(req, res, onSuccess, onError) {
         const now = Date.now();
         let promises = [];
         const thumbs = [];
-        response.files.forEach((f, i) => {
+        response.files.forEach(f => {
             if (body.withThumbnail) {
                 promises.push(makeThumbnailPromise(f, now));
-                thumbs.push(i);
+                thumbs.push(true);
             }
             promises.push(compressImagePromise(f, 80, now, body.watermark));
+            thumbs.push(false);
         });
         Promise.all(promises).then(all => {
             let fileIdx = 0;
             all.forEach((filename, i) => {
-                if (thumbs.includes(i)) {
+                if (thumbs[i]) {
                     response.files[fileIdx].thumbnailPath = filename;
                 } else {
                     response.files[fileIdx].path = filename;
